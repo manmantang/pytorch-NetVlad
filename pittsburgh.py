@@ -12,7 +12,7 @@ from PIL import Image
 from sklearn.neighbors import NearestNeighbors
 import h5py
 
-root_dir = '/nfs/ibrahimi/data/pittsburgh/'
+root_dir = '/home/manman/pytorch-NetVlad/data/pittsburgh/'
 if not exists(root_dir):
     raise FileNotFoundError('root_dir is hardcoded, please adjust to point to Pittsburth dataset')
 
@@ -73,7 +73,6 @@ dbStruct = namedtuple('dbStruct', ['whichSet', 'dataset',
 def parse_dbStruct(path):
     mat = loadmat(path)
     matStruct = mat['dbStruct'].item()
-
     if '250k' in path.split('/')[-1]:
         dataset = 'pitts250k'
     else:
@@ -81,8 +80,8 @@ def parse_dbStruct(path):
 
     whichSet = matStruct[0].item()
 
-    dbImage = [f[0].item() for f in matStruct[1]]
-    utmDb = matStruct[2].T
+    dbImage = [f[0].item() for f in matStruct[1]]  # multiple angles images
+    utmDb = matStruct[2].T   # the location
 
     qImage = [f[0].item() for f in matStruct[3]]
     utmQ = matStruct[4].T

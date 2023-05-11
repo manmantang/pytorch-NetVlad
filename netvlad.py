@@ -30,7 +30,8 @@ class NetVLAD(nn.Module):
         self.vladv2 = vladv2
         self.normalize_input = normalize_input
         self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=vladv2)
-        self.centroids = nn.Parameter(torch.rand(num_clusters, dim))
+        self.centroids = nn.Parameter(torch.rand(num_clusters, dim)) 
+    """genare 2*4 random martrix"""
 
     def init_params(self, clsts, traindescs):
         #TODO replace numpy ops with pytorch ops
