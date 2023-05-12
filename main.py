@@ -28,6 +28,7 @@ import netvlad
 import onnx
 import onnxruntime
 from onnxruntime.quantization import quantize_dynamic
+from torch2trt import torch2trt
 
 parser = argparse.ArgumentParser(description='pytorch-NetVlad')
 parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster'])
@@ -53,7 +54,7 @@ parser.add_argument('--dataPath', type=str, default='/nfs/ibrahimi/data/', help=
 parser.add_argument('--runsPath', type=str, default='/nfs/ibrahimi/runs/', help='Path to save runs to.')
 parser.add_argument('--savePath', type=str, default='checkpoints', 
         help='Path to save checkpoints to in logdir. Default=checkpoints/')
-parser.add_argument('--cachePath', type=str, default=environ['SSH_AUTH_SOCK'], help='Path to save cache to.')
+parser.add_argument('--cachePath', type=str, default=environ.get('SSH_AUTH_SOCK','/default/path/to/cache'), help='Path to save cache to.')
 parser.add_argument('--resume', type=str, default='', help='Path to load checkpoint from, for resuming training or testing.')
 parser.add_argument('--ckpt', type=str, default='latest', 
         help='Resume from latest or best checkpoint.', choices=['latest', 'best'])
@@ -440,11 +441,55 @@ if __name__ == "__main__":
     encoder = nn.Sequential(*layers)
     model = nn.Module() 
     model.add_module('encoder', encoder)
-    # dummy_input = torch.randn(1, 3, 224, 224)
-    # input_names = ["input"]
-    # output_names = ["vgg16_output"]
-    # vgg16_onnx_path = "vgg16.onnx"
-    # torch.onnx.export(encoder, dummy_input, vgg16_onnx_path, input_names=input_names, output_names=output_names)
+
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    checkpoint_ = torch.load('vgg16_netvlad_checkpoint/checkpoints/checkpoint.pth.tar', map_location=lambda storage, loc: storage)
+    save_dict = checkpoint_['state_dict']
+    # print("save_dict keys : ",save_dict.keys())
+    # modify key name
+    save_dict['0.weight'] = save_dict.pop('encoder.0.weight') 
+    save_dict['0.bias'] = save_dict.pop('encoder.0.bias') 
+    save_dict['2.weight'] = save_dict.pop('encoder.2.weight') 
+    save_dict['2.bias'] = save_dict.pop('encoder.2.bias') 
+    save_dict['5.weight'] = save_dict.pop('encoder.5.weight') 
+    save_dict['5.bias'] = save_dict.pop('encoder.5.bias') 
+    save_dict['7.weight'] = save_dict.pop('encoder.7.weight') 
+    save_dict['7.bias'] = save_dict.pop('encoder.7.bias') 
+    save_dict['10.weight'] = save_dict.pop('encoder.10.weight') 
+    save_dict['10.bias'] = save_dict.pop('encoder.10.bias') 
+    save_dict['12.weight'] = save_dict.pop('encoder.12.weight') 
+    save_dict['12.bias'] = save_dict.pop('encoder.12.bias') 
+    save_dict['14.weight'] = save_dict.pop('encoder.14.weight') 
+    save_dict['14.bias'] = save_dict.pop('encoder.14.bias') 
+    save_dict['17.weight'] = save_dict.pop('encoder.17.weight') 
+    save_dict['17.bias'] = save_dict.pop('encoder.17.bias') 
+    save_dict['19.weight'] = save_dict.pop('encoder.19.weight') 
+    save_dict['19.bias'] = save_dict.pop('encoder.19.bias') 
+    save_dict['21.weight'] = save_dict.pop('encoder.21.weight') 
+    save_dict['21.bias'] = save_dict.pop('encoder.21.bias') 
+    save_dict['24.weight'] = save_dict.pop('encoder.24.weight') 
+    save_dict['24.bias'] = save_dict.pop('encoder.24.bias') 
+    save_dict['26.weight'] = save_dict.pop('encoder.26.weight') 
+    save_dict['26.bias'] = save_dict.pop('encoder.26.bias') 
+    save_dict['28.weight'] = save_dict.pop('encoder.28.weight') 
+    save_dict['28.bias'] = save_dict.pop('encoder.28.bias') 
+    # print("after save_dict keys : ",save_dict.keys())
+    # print("save value : ",save_dict['0.weight'])
+    model_dict = encoder.state_dict()
+    # print("model value : ",model_dict['0.weight'])
+
+    # print("model_dict keys : ",model_dict.keys())
+    state_dict = {k:v for k,v in save_dict.items() if k in model_dict.keys()}
+    # print(state_dict.keys())
+    model_dict.update(state_dict)
+    # print("update model value : ",model_dict['0.weight'])
+
+    encoder.load_state_dict(model_dict)
+    dummy_input = torch.randn(1, 3, 224, 224)
+    input_names = ["input"]
+    output_names = ["vgg16_output"]
+    vgg16_onnx_path = "vgg16.onnx"
+    torch.onnx.export(encoder, dummy_input, vgg16_onnx_path, input_names=input_names, output_names=output_names)
 
 
     if opt.mode.lower() != 'cluster':
@@ -475,104 +520,120 @@ if __name__ == "__main__":
         else:
             raise ValueError('Unknown pooling type: ' + opt.pooling)
 
-    # isParallel = False
-    # if opt.nGPU > 1 and torch.cuda.device_count() > 1:
-    #     model.encoder = nn.DataParallel(model.encoder)
-    #     if opt.mode.lower() != 'cluster':
-    #         model.pool = nn.DataParallel(model.pool)
-    #     isParallel = True
+    isParallel = False
+    if opt.nGPU > 1 and torch.cuda.device_count() > 1:
+        model.encoder = nn.DataParallel(model.encoder)
+        if opt.mode.lower() != 'cluster':
+            model.pool = nn.DataParallel(model.pool)
+        isParallel = True
 
-    # if not opt.resume:
-    #     model = model.to(device)
+    if not opt.resume:
+        model = model.to(device)
     
-    # if opt.mode.lower() == 'train':
-    #     if opt.optim.upper() == 'ADAM':
-    #         optimizer = optim.Adam(filter(lambda p: p.requires_grad, 
-    #             model.parameters()), lr=opt.lr)#, betas=(0,0.9))
-    #     elif opt.optim.upper() == 'SGD':
-    #         optimizer = optim.SGD(filter(lambda p: p.requires_grad, 
-    #             model.parameters()), lr=opt.lr,
-    #             momentum=opt.momentum,
-    #             weight_decay=opt.weightDecay)
+    if opt.mode.lower() == 'train':
+        if opt.optim.upper() == 'ADAM':
+            optimizer = optim.Adam(filter(lambda p: p.requires_grad, 
+                model.parameters()), lr=opt.lr)#, betas=(0,0.9))
+        elif opt.optim.upper() == 'SGD':
+            optimizer = optim.SGD(filter(lambda p: p.requires_grad, 
+                model.parameters()), lr=opt.lr,
+                momentum=opt.momentum,
+                weight_decay=opt.weightDecay)
 
-    #         scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=opt.lrStep, gamma=opt.lrGamma)
-    #     else:
-    #         raise ValueError('Unknown optimizer: ' + opt.optim)
+            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=opt.lrStep, gamma=opt.lrGamma)
+        else:
+            raise ValueError('Unknown optimizer: ' + opt.optim)
 
-    #     # original paper/code doesn't sqrt() the distances, we do, so sqrt() the margin, I think :D
-    #     criterion = nn.TripletMarginLoss(margin=opt.margin**0.5, 
-    #             p=2, reduction='sum').to(device)
+        # original paper/code doesn't sqrt() the distances, we do, so sqrt() the margin, I think :D
+        criterion = nn.TripletMarginLoss(margin=opt.margin**0.5, 
+                p=2, reduction='sum').to(device)
 
-    # if opt.resume:
-    #     if opt.ckpt.lower() == 'latest':
-    #         resume_ckpt = join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')
-    #     elif opt.ckpt.lower() == 'best':
-    #         resume_ckpt = join(opt.resume, 'checkpoints', 'model_best.pth.tar')
+    if opt.resume:
+        if opt.ckpt.lower() == 'latest':
+            resume_ckpt = join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')
+        elif opt.ckpt.lower() == 'best':
+            resume_ckpt = join(opt.resume, 'checkpoints', 'model_best.pth.tar')
 
-    #     if isfile(resume_ckpt):
-    #         print("=> loading checkpoint '{}'".format(resume_ckpt))
-    #         checkpoint = torch.load(resume_ckpt, map_location=lambda storage, loc: storage)
-    #         opt.start_epoch = checkpoint['epoch']
-    #         best_metric = checkpoint['best_score']
-    #         model.load_state_dict(checkpoint['state_dict'])
-    #         model = model.to(device)
-    #         if opt.mode == 'train':
-    #             optimizer.load_state_dict(checkpoint['optimizer'])
-    #         print("=> loaded checkpoint '{}' (epoch {})"
-    #               .format(resume_ckpt, checkpoint['epoch']))
-    #     else:
-    #         print("=> no checkpoint found at '{}'".format(resume_ckpt))
+        if isfile(resume_ckpt):
+            print("=> loading checkpoint '{}'".format(resume_ckpt))
+            checkpoint = torch.load(resume_ckpt, map_location=lambda storage, loc: storage)
+            opt.start_epoch = checkpoint['epoch']
+            best_metric = checkpoint['best_score']
+            model.load_state_dict(checkpoint['state_dict'])
+            model = model.to(device)
+            if opt.mode == 'train':
+                optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> loaded checkpoint '{}' (epoch {})"
+                  .format(resume_ckpt, checkpoint['epoch']))
+        else:
+            print("=> no checkpoint found at '{}'".format(resume_ckpt))
 
-    # if opt.mode.lower() == 'test':
-    #     print('===> Running evaluation step')
-    #     epoch = 1
-    #     recalls = test(whole_test_set, epoch, write_tboard=False)
-    # elif opt.mode.lower() == 'cluster':
-    #     print('===> Calculating descriptors and clusters')
-    #     get_clusters(whole_train_set)
-    # elif opt.mode.lower() == 'train':
-    #     print('===> Training model')
-    #     writer = SummaryWriter(log_dir=join(opt.runsPath, datetime.now().strftime('%b%d_%H-%M-%S')+'_'+opt.arch+'_'+opt.pooling))
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!failed ,no forward()
+    # input_shape = (1, 3, 224, 224)
+    # input_dtype = torch.float32
+    # onnx_model_path = 'path/to/onnx/model.onnx'
+    # dummy_input = torch.zeros(input_shape).to(device)
+    # torch.onnx.export(model, dummy_input, onnx_model_path, verbose=False)
+    for name,para in checkpoint['state_dict'].items():
+        print(name,':',para.size())
 
-    #     # write checkpoints in logdir
-    #     logdir = writer.file_writer.get_logdir()
-    #     opt.savePath = join(logdir, opt.savePath)
-    #     if not opt.resume:
-    #         makedirs(opt.savePath)
+    print(checkpoint['state_dict']['pool.centroids'])
 
-    #     with open(join(opt.savePath, 'flags.json'), 'w') as f:
-    #         f.write(json.dumps(
-    #             {k:v for k,v in vars(opt).items()}
-    #             ))
-    #     print('===> Saving state to:', logdir)
+    print("*******************************")
+    for name,param in model.state_dict().items():
+        print(name ,':',param.size())
 
-    #     not_improved = 0
-    #     best_score = 0
-    #     for epoch in range(opt.start_epoch+1, opt.nEpochs + 1):
-    #         if opt.optim.upper() == 'SGD':
-    #             scheduler.step(epoch)
-    #         train(epoch)
-    #         if (epoch % opt.evalEvery) == 0:
-    #             recalls = test(whole_test_set, epoch, write_tboard=True)
-    #             is_best = recalls[5] > best_score 
-    #             if is_best:
-    #                 not_improved = 0
-    #                 best_score = recalls[5]
-    #             else: 
-    #                 not_improved += 1
 
-    #             save_checkpoint({
-    #                     'epoch': epoch,
-    #                     'state_dict': model.state_dict(),
-    #                     'recalls': recalls,
-    #                     'best_score': best_score,
-    #                     'optimizer' : optimizer.state_dict(),
-    #                     'parallel' : isParallel,
-    #             }, is_best)
+    if opt.mode.lower() == 'test':
+        print('===> Running evaluation step')
+        epoch = 1
+        # recalls = test(whole_test_set, epoch, write_tboard=False)
+    elif opt.mode.lower() == 'cluster':
+        print('===> Calculating descriptors and clusters')
+        get_clusters(whole_train_set)
+    elif opt.mode.lower() == 'train':
+        print('===> Training model')
+        writer = SummaryWriter(log_dir=join(opt.runsPath, datetime.now().strftime('%b%d_%H-%M-%S')+'_'+opt.arch+'_'+opt.pooling))
 
-    #             if opt.patience > 0 and not_improved > (opt.patience / opt.evalEvery):
-    #                 print('Performance did not improve for', opt.patience, 'epochs. Stopping.')
-    #                 break
+        # write checkpoints in logdir
+        logdir = writer.file_writer.get_logdir()
+        opt.savePath = join(logdir, opt.savePath)
+        if not opt.resume:
+            makedirs(opt.savePath)
 
-    #     print("=> Best Recall@5: {:.4f}".format(best_score), flush=True)
-    #     writer.close()
+        with open(join(opt.savePath, 'flags.json'), 'w') as f:
+            f.write(json.dumps(
+                {k:v for k,v in vars(opt).items()}
+                ))
+        print('===> Saving state to:', logdir)
+
+        not_improved = 0
+        best_score = 0
+        for epoch in range(opt.start_epoch+1, opt.nEpochs + 1):
+            if opt.optim.upper() == 'SGD':
+                scheduler.step(epoch)
+            train(epoch)
+            if (epoch % opt.evalEvery) == 0:
+                recalls = test(whole_test_set, epoch, write_tboard=True)
+                is_best = recalls[5] > best_score 
+                if is_best:
+                    not_improved = 0
+                    best_score = recalls[5]
+                else: 
+                    not_improved += 1
+
+                save_checkpoint({
+                        'epoch': epoch,
+                        'state_dict': model.state_dict(),
+                        'recalls': recalls,
+                        'best_score': best_score,
+                        'optimizer' : optimizer.state_dict(),
+                        'parallel' : isParallel,
+                }, is_best)
+
+                if opt.patience > 0 and not_improved > (opt.patience / opt.evalEvery):
+                    print('Performance did not improve for', opt.patience, 'epochs. Stopping.')
+                    break
+
+        print("=> Best Recall@5: {:.4f}".format(best_score), flush=True)
+        writer.close()

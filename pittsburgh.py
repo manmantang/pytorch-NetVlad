@@ -12,7 +12,7 @@ from PIL import Image
 from sklearn.neighbors import NearestNeighbors
 import h5py
 
-root_dir = '/home/manman/pytorch-NetVlad/data/pittsburgh/'
+root_dir = '/workspace/workspace/pytorch-NetVlad/data/pittsburgh/'
 if not exists(root_dir):
     raise FileNotFoundError('root_dir is hardcoded, please adjust to point to Pittsburth dataset')
 
