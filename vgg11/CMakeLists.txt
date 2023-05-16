@@ -20,6 +20,7 @@ link_directories(/usr/lib/x86_64-linux-gnu/)
 add_executable(vgg ${PROJECT_SOURCE_DIR}/vgg11.cpp)
 target_link_libraries(vgg nvinfer)
 target_link_libraries(vgg cudart)
+target_link_libraries(vgg PRIVATE nvonnxparser)
 
 add_definitions(-O2 -pthread)
 

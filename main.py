@@ -5,7 +5,7 @@ import random, shutil, json
 from os.path import join, exists, isfile, realpath, dirname
 from os import makedirs, remove, chdir, environ
 import time
-
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,7 +20,7 @@ import torchvision.datasets as datasets
 import torchvision.models as models
 import h5py
 import faiss
-
+import struct
 from tensorboardX import SummaryWriter
 import numpy as np
 import netvlad
@@ -73,6 +73,9 @@ parser.add_argument('--margin', type=float, default=0.1, help='Margin for triple
 parser.add_argument('--split', type=str, default='val', help='Data split to use for testing. Default is val', 
         choices=['test', 'test250k', 'train', 'val'])
 parser.add_argument('--fromscratch', action='store_true', help='Train from scratch rather than using pretrained models')
+
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+torch.backends.cudnn.benchmark = True
 
 def train(epoch):
     epoch_loss = 0
@@ -178,7 +181,7 @@ def test(eval_set, epoch=0, write_tboard=False):
     # TODO what if features dont fit in memory? 
     test_data_loader = DataLoader(dataset=eval_set, 
                 num_workers=opt.threads, batch_size=opt.cacheBatchSize, shuffle=False, 
-                pin_memory=cuda)
+                pin_memory=False)
     print("====> test data [database size : {}   query size : {}]".format(eval_set.dbStruct.numDb,
                                                                     eval_set.dbStruct.numQ))
     print("==> test data loader size : {}".format(len(test_data_loader)))
@@ -195,8 +198,12 @@ def test(eval_set, epoch=0, write_tboard=False):
         for iteration, (input, indices) in enumerate(test_data_loader, 1):
             start_t = time.time()
             input = input.to(device)
+            print("vgg16 input size : {}".format(input.shape))
             image_encoding = model.encoder(input)
+            print("vgg16 output : {}".format(image_encoding.shape))
             vlad_encoding = model.pool(image_encoding) 
+            print("vlad encoding size : {}".format(vlad_encoding.shape))
+
             end_t = time.time()
             run_t = end_t - start_t
             extract_time_sum += run_t
@@ -440,7 +447,7 @@ if __name__ == "__main__":
 
     encoder = nn.Sequential(*layers)
     model = nn.Module() 
-    model.add_module('encoder', encoder)
+    # model.add_module('encoder', encoder)
 
     #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     checkpoint_ = torch.load('vgg16_netvlad_checkpoint/checkpoints/checkpoint.pth.tar', map_location=lambda storage, loc: storage)
@@ -473,28 +480,42 @@ if __name__ == "__main__":
     save_dict['26.bias'] = save_dict.pop('encoder.26.bias') 
     save_dict['28.weight'] = save_dict.pop('encoder.28.weight') 
     save_dict['28.bias'] = save_dict.pop('encoder.28.bias') 
-    # print("after save_dict keys : ",save_dict.keys())
-    # print("save value : ",save_dict['0.weight'])
     model_dict = encoder.state_dict()
-    # print("model value : ",model_dict['0.weight'])
 
-    # print("model_dict keys : ",model_dict.keys())
     state_dict = {k:v for k,v in save_dict.items() if k in model_dict.keys()}
-    # print(state_dict.keys())
-    model_dict.update(state_dict)
-    # print("update model value : ",model_dict['0.weight'])
-
-    encoder.load_state_dict(model_dict)
-    dummy_input = torch.randn(1, 3, 224, 224)
-    input_names = ["input"]
-    output_names = ["vgg16_output"]
-    vgg16_onnx_path = "vgg16.onnx"
-    torch.onnx.export(encoder, dummy_input, vgg16_onnx_path, input_names=input_names, output_names=output_names)
+    model_dict.update(state_dict) #用netvlad保存的vgg参数更新预训练模型中的参数
+    encoder.load_state_dict(model_dict) #把更新后的参数重新加载进encoder
+    
+    #!!!!!! 保存vgg16权重的代码！！！！！！！！！！！！！！！！！
+    # f = open("vgg16_weights.wts", 'w') #自己命名wts文件
+    # f.write("{}\n".format(len(encoder.state_dict().keys())))  #保存所有keys的数量
+    # for k,v in encoder.state_dict().items():
+    #     print('key: ', k)
+    #     print('value: ', v.shape)
+    #     vr = v.reshape(-1).cpu().numpy()
+    #     f.write("{} {}".format(k, len(vr)))  #保存每一层名称和参数长度
+    #     for vv in vr:
+    #         f.write(" ")
+    #         f.write(struct.pack(">f", float(vv)).hex())  #使用struct把权重封装成字符串
+    #     f.write("\n")
 
 
     if opt.mode.lower() != 'cluster':
         if opt.pooling.lower() == 'netvlad':
             net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
+
+            net_vlad.load_state_dict(checkpoint_['state_dict'],strict=False)
+            input_shape = (1, 512, 30, 40)
+            input_names = ["encoding_tensor"]
+            output_names = ["vlad"]
+            onnx_model_path = 'test_vladNet.onnx'
+            dummy_input = torch.randn(*input_shape)
+            torch.onnx.export(net_vlad, dummy_input, onnx_model_path,input_names=input_names, output_names=output_names, verbose=False)
+            print("*******************************")
+            for name,param in net_vlad.state_dict().items():
+                print(name ,':',param.size())
+                print(param)
+
             if not opt.resume: 
                 if opt.mode.lower() == 'train':
                     initcache = join(opt.dataPath, 'centroids', opt.arch + '_' + train_set.dataset + '_' + str(opt.num_clusters) +'_desc_cen.hdf5')
@@ -559,7 +580,7 @@ if __name__ == "__main__":
             checkpoint = torch.load(resume_ckpt, map_location=lambda storage, loc: storage)
             opt.start_epoch = checkpoint['epoch']
             best_metric = checkpoint['best_score']
-            model.load_state_dict(checkpoint['state_dict'])
+            model.load_state_dict(checkpoint['state_dict'],strict=False)
             model = model.to(device)
             if opt.mode == 'train':
                 optimizer.load_state_dict(checkpoint['optimizer'])
@@ -569,19 +590,17 @@ if __name__ == "__main__":
             print("=> no checkpoint found at '{}'".format(resume_ckpt))
 
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!failed ,no forward()
-    # input_shape = (1, 3, 224, 224)
+    # input_shape = (1, 512, 30, 40)
     # input_dtype = torch.float32
-    # onnx_model_path = 'path/to/onnx/model.onnx'
+    # input_names = ["encoding_tensor"]
+    # output_names = ["vlad"]
+    # onnx_model_path = 'vladNet.onnx'
     # dummy_input = torch.zeros(input_shape).to(device)
-    # torch.onnx.export(model, dummy_input, onnx_model_path, verbose=False)
-    for name,para in checkpoint['state_dict'].items():
-        print(name,':',para.size())
+    # torch.onnx.export(model, dummy_input, onnx_model_path,input_names=input_names, output_names=output_names, verbose=False)
 
-    print(checkpoint['state_dict']['pool.centroids'])
-
-    print("*******************************")
-    for name,param in model.state_dict().items():
-        print(name ,':',param.size())
+    # print("*******************************")
+    # for name,param in model.state_dict().items():
+    #     print(name ,':',param.size())
 
 
     if opt.mode.lower() == 'test':

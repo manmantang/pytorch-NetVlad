@@ -30,7 +30,7 @@ class NetVLAD(nn.Module):
         self.vladv2 = vladv2
         self.normalize_input = normalize_input
         self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=vladv2)
-        self.centroids = nn.Parameter(torch.rand(num_clusters, dim)) 
+        self.centroids = nn.Parameter(torch.rand(num_clusters, dim)) # (64*512)
     """genare 2*4 random martrix"""
 
     def init_params(self, clsts, traindescs):
@@ -69,17 +69,17 @@ class NetVLAD(nn.Module):
             x = F.normalize(x, p=2, dim=1)  # across descriptor dim
 
         # soft-assignment
-        soft_assign = self.conv(x).view(N, self.num_clusters, -1)
-        soft_assign = F.softmax(soft_assign, dim=1)
+        soft_assign = self.conv(x).view(N, self.num_clusters, -1) #(N,64,H*W)
+        soft_assign = F.softmax(soft_assign, dim=1) # (N,64,H*W)每个元素代表一个特征向量到族质心的软分配
 
-        x_flatten = x.view(N, C, -1)
+        x_flatten = x.view(N, C, -1) #（N,C,H*W)
         
         # calculate residuals to each clusters
         vlad = torch.zeros([N, self.num_clusters, C], dtype=x.dtype, layout=x.layout, device=x.device)
         for C in range(self.num_clusters): # slower than non-looped, but lower memory usage 
             residual = x_flatten.unsqueeze(0).permute(1, 0, 2, 3) - \
-                    self.centroids[C:C+1, :].expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
-            residual *= soft_assign[:,C:C+1,:].unsqueeze(2)
+                    self.centroids[C:C+1, :].expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0) #（1,64,512，H*W)
+            residual *= soft_assign[:,C:C+1,:].unsqueeze(2) #（N,1,1,H*W)
             vlad[:,C:C+1,:] = residual.sum(dim=-1)
 
         vlad = F.normalize(vlad, p=2, dim=2)  # intra-normalization
