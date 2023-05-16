@@ -4,3 +4,6 @@
 build/
 .git/
 data/
+vgg16_weights.pth
+vgg16_weights.wts
+vgg11/build/
