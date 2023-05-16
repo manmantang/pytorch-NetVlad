@@ -7,3 +7,4 @@ data/
 vgg16_weights.pth
 vgg16_weights.wts
 vgg11/build/
+vgg11/sim_vladNet.onnx 
