@@ -2,13 +2,18 @@ cmake_minimum_required(VERSION 2.6)
 
 project(vgg)
 
-add_definitions(-std=c++11)
+add_definitions(-std=c++14)
+# add_definitions(-D_GLIBCXX_USE_CXX11_ABI=1)
 
 option(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_BUILD_TYPE Debug)
+cmake_policy(SET CMP0012 NEW)
+list(APPEND CMAKE_PREFIX_PATH "/usr/local/lib/python3.8/dist-packages")
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+find_package(OpenCV REQUIRED)
+include_directories(${PROJECT_SOURCE_DIR}/include )
+
 # include and link dirs of cuda and tensorrt, you need adapt them if yours are different
 # cuda
 include_directories(/usr/local/cuda/include)
@@ -18,9 +23,8 @@ include_directories(/usr/include/x86_64-linux-gnu/)
 link_directories(/usr/lib/x86_64-linux-gnu/)
 
 add_executable(vgg ${PROJECT_SOURCE_DIR}/vgg11.cpp)
-target_link_libraries(vgg nvinfer)
-target_link_libraries(vgg cudart)
-target_link_libraries(vgg PRIVATE nvonnxparser)
+target_link_libraries(vgg nvinfer cudart nvonnxparser)
+target_link_libraries(vgg ${OpenCV_LIBRARIES})
 
 add_definitions(-O2 -pthread)
 

@@ -29,6 +29,7 @@ import onnx
 import onnxruntime
 from onnxruntime.quantization import quantize_dynamic
 from torch2trt import torch2trt
+from torchsummary import summary
 
 parser = argparse.ArgumentParser(description='pytorch-NetVlad')
 parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster'])
@@ -326,18 +327,6 @@ class L2Norm(nn.Module):
     def forward(self, input):
         return F.normalize(input, p=2, dim=self.dim)
 
-
-class MyModel(nn.Module):
-    def __init__(self):
-        super(MyModel, self).__init__()
-        self.encoder = models.vgg16(True)
-        self.layers = list(self.encoder.features.children())[:-2]
-
-    def forward(self, x):
-        x = self.encoder(x)
-        x = x.view(x.size(0), -1)
-        return x
-
 if __name__ == "__main__":
     opt = parser.parse_args()
 
@@ -447,9 +436,14 @@ if __name__ == "__main__":
 
     encoder = nn.Sequential(*layers)
     model = nn.Module() 
-    # model.add_module('encoder', encoder)
+    model.add_module('encoder', encoder)
 
-    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    '''
+    description: 单独提取vgg的权重参数
+    return {*}
+    '''
+    # #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     checkpoint_ = torch.load('vgg16_netvlad_checkpoint/checkpoints/checkpoint.pth.tar', map_location=lambda storage, loc: storage)
     save_dict = checkpoint_['state_dict']
     # print("save_dict keys : ",save_dict.keys())
@@ -480,18 +474,46 @@ if __name__ == "__main__":
     save_dict['26.bias'] = save_dict.pop('encoder.26.bias') 
     save_dict['28.weight'] = save_dict.pop('encoder.28.weight') 
     save_dict['28.bias'] = save_dict.pop('encoder.28.bias') 
-    model_dict = encoder.state_dict()
+    save_dict['centroids'] = save_dict.pop('pool.centroids') 
+    save_dict['conv.weight'] = save_dict.pop('pool.conv.weight') 
 
-    state_dict = {k:v for k,v in save_dict.items() if k in model_dict.keys()}
-    model_dict.update(state_dict) #用netvlad保存的vgg参数更新预训练模型中的参数
-    encoder.load_state_dict(model_dict) #把更新后的参数重新加载进encoder
+    # model_dict = encoder.state_dict()
+
+    # state_dict = {k:v for k,v in save_dict.items() if k in model_dict.keys()}
+
+    #检查更新前后是否发生变化
+    # for k, v in model_dict.items():
+    #     assert k in state_dict, f"Parameter {k} not found in state dict"
+    #     if not torch.allclose(v, state_dict[k]):
+    #              print("Parameter {} values are not equal".format(k))
+
+    # model_dict.update(state_dict) #用netvlad保存的vgg参数更新预训练模型中的参数
+
+    # print("!!!!!!!!!!! check updata param change!")
+    # #检查是否正确更新权重
+    # for k, v in model_dict.items():
+    #     assert k in state_dict, f"Parameter {k} not found in state dict"
+    #     if not torch.allclose(v, state_dict[k]):
+    #              print("Parameter {} values are not equal".format(k))
+
+
+    # encoder.load_state_dict(state_dict) #把更新后的参数重新加载进encoder
+
+    '''
+    description: 查看encoder全部网络结构
+    return {*}
+    '''
+    # encoder = encoder.to(device)
+    # summary(encoder,(3,100,100))
+
     
     #!!!!!! 保存vgg16权重的代码！！！！！！！！！！！！！！！！！
-    # f = open("vgg16_weights.wts", 'w') #自己命名wts文件
-    # f.write("{}\n".format(len(encoder.state_dict().keys())))  #保存所有keys的数量
-    # for k,v in encoder.state_dict().items():
-    #     print('key: ', k)
-    #     print('value: ', v.shape)
+    # f = open("vgg16_weights.wts", 'w') #原始vgg16权重wts文件
+    # f.write("{}\n".format(len(state_dict.keys())))  #保存所有keys的数量
+    # print("only save vgg16 weight value!!!!!!!!!!")
+    # for k,v in state_dict.items():
+    #     # print('key: ', k)
+    #     # print('value: ', v)
     #     vr = v.reshape(-1).cpu().numpy()
     #     f.write("{} {}".format(k, len(vr)))  #保存每一层名称和参数长度
     #     for vv in vr:
@@ -503,18 +525,27 @@ if __name__ == "__main__":
     if opt.mode.lower() != 'cluster':
         if opt.pooling.lower() == 'netvlad':
             net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
+            
 
-            net_vlad.load_state_dict(checkpoint_['state_dict'],strict=False)
-            input_shape = (1, 512, 30, 40)
-            input_names = ["encoding_tensor"]
-            output_names = ["vlad"]
-            onnx_model_path = 'test_vladNet.onnx'
-            dummy_input = torch.randn(*input_shape)
-            torch.onnx.export(net_vlad, dummy_input, onnx_model_path,input_names=input_names, output_names=output_names, verbose=False)
-            print("*******************************")
-            for name,param in net_vlad.state_dict().items():
-                print(name ,':',param.size())
-                print(param)
+            '''
+            description:构建netvlad的onnx模型 
+            return {*}
+            '''
+            #！！！！！！！！！！！！！！！！单独提取netvlad的权重
+            # net_before_dict = net_vlad.state_dict()
+            # netvlad_dict = {k:v for k,v in save_dict.items() if k in net_before_dict.keys()}
+
+            # net_vlad.load_state_dict(netvlad_dict)
+            # net_vlad.float()
+            # net_vlad.eval()
+            # input_shape = (1, 512, 30, 40)
+            # input_names = ["vgg16_tensor"]
+            # output_shape = (1, 32768)
+            # output_names = ["vlad_encoding"]
+            # onnx_model_path = 'vladNet.onnx'
+            # dummy_input = torch.randn(*input_shape,dtype=torch.float32)
+            # torch.onnx.export(net_vlad, dummy_input, onnx_model_path, export_params=True,input_names=input_names, output_names=output_names, verbose= False,
+            #                  dynamic_axes = {'vgg16_tensor':{0: 'batch_size', 2: 'in_width', 3: 'in_height'},'vlad_encoding':{0: 'batch_size', 1: 'vlad_dim'}})
 
             if not opt.resume: 
                 if opt.mode.lower() == 'train':
@@ -569,6 +600,10 @@ if __name__ == "__main__":
         criterion = nn.TripletMarginLoss(margin=opt.margin**0.5, 
                 p=2, reduction='sum').to(device)
 
+    '''
+    description: 加载模型参数
+    return {*}
+    '''    
     if opt.resume:
         if opt.ckpt.lower() == 'latest':
             resume_ckpt = join(opt.resume, 'checkpoints', 'checkpoint.pth.tar')
@@ -589,18 +624,54 @@ if __name__ == "__main__":
         else:
             print("=> no checkpoint found at '{}'".format(resume_ckpt))
 
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!failed ,no forward()
-    # input_shape = (1, 512, 30, 40)
-    # input_dtype = torch.float32
-    # input_names = ["encoding_tensor"]
-    # output_names = ["vlad"]
-    # onnx_model_path = 'vladNet.onnx'
-    # dummy_input = torch.zeros(input_shape).to(device)
-    # torch.onnx.export(model, dummy_input, onnx_model_path,input_names=input_names, output_names=output_names, verbose=False)
+    '''
+    description: 打印加载的参数的每层权重
+    return {*}
+    '''
+    # print("model weight value : ")
+    # for k,v in model.state_dict().items():
+    #     print('key: ', k)
+    #     print('value: ', v)
 
-    # print("*******************************")
-    # for name,param in model.state_dict().items():
-    #     print(name ,':',param.size())
+    #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!加载实际图片
+    img = Image.open("/workspace/workspace/pytorch-NetVlad/data/pittsburgh/000/000000_pitch1_yaw1.jpg")
+    img = transforms.ToTensor()(img)
+    img = transforms.transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])(img)
+    img = torch.unsqueeze(img, 0)
+    print(img[0,0,0,0])
+    print(img[0,0,0,1])
+    print(img[0,0,0,2])
+    print(img[0,0,0,3])
+    print(img[0,0,0,4])
+
+    img = img.to(device)
+
+    '''
+    description: 模拟全是1的480*640输入
+    return {*}
+    '''
+    # arr = np.ones((1,3,480,640))
+    # img = torch.tensor(arr, dtype=torch.float32)
+    # img = img.to(device)
+
+    # print("vgg16 input size : {}".format(img.shape))
+    print(img)
+    image_encoding = model.encoder(img)
+    # print("vgg16 output : {}".format(image_encoding.shape))
+    # print(image_encoding)
+
+    # Reshape the tensor to a 2D array
+    # tensor_2d = image_encoding.reshape(512, -1)
+    # print(tensor_2d)
+    # Write the tensor to a file
+    # tensor_2d_cpu = tensor_2d.cpu().detach().numpy()
+    # np.savetxt('100vgg_code.txt', tensor_2d_cpu, delimiter=',')
+
+    vlad_encoding = model.pool(image_encoding) 
+    print("vlad encoding size : {}".format(vlad_encoding.shape))
+    print(vlad_encoding)
+    vlad_encoding_cpu = vlad_encoding.cpu().detach().numpy()
+    np.savetxt('100vlad_code.txt',vlad_encoding_cpu, delimiter=',')
 
 
     if opt.mode.lower() == 'test':

@@ -72,6 +72,7 @@ dbStruct = namedtuple('dbStruct', ['whichSet', 'dataset',
 
 def parse_dbStruct(path):
     mat = loadmat(path)
+    print(mat)
     matStruct = mat['dbStruct'].item()
     if '250k' in path.split('/')[-1]:
         dataset = 'pitts250k'
